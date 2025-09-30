@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Realtime Voice Chatbot</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg1:#0f172a; --bg2:#071133;
+      --accent:#7c5cff; --muted:#9aa4bf;
+      --success:#34d399; --danger:#fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: Inter, system-ui, Arial;
+      margin: 0; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(180deg,var(--bg1),var(--bg2));
+      color: #e6eef8;
+    }
+    .wrap { width: min(920px,96vw); padding: 32px; }
+    .card {
+      background: rgba(255,255,255,0.04);
+      border-radius: 16px; box-shadow: 0 8px 30px rgba(2,6,23,0.7);
+      padding: 20px; backdrop-filter: blur(6px);
+    }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+    .logo {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg,var(--accent),#4cc9f0);
+      border-radius: 10px; display: grid; place-items: center;
+      font-weight: 700;
+    }
+    h1 { font-size: 18px; margin: 0; }
+    .sub { color: var(--muted); font-size: 13px; }
+    .status { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--success); box-shadow: 0 0 8px var(--success);
+    }
+    .dot.off { background: var(--muted); box-shadow: none; }
+    main { display: grid; grid-template-columns: 1fr 320px; gap: 18px; }
+    .messages-card {
+      padding: 14px; background: rgba(255,255,255,0.02);
+      border-radius: 12px; min-height: 360px; max-height: 60vh; overflow: auto;
+    }
+    .messages { display: flex; flex-direction: column; gap: 12px; }
+    .bubble {
+      max-width: 78%; padding: 12px 14px;
+      border-radius: 12px; line-height: 1.35;
+    }
+    .user {
+      align-self: flex-end;
+      background: linear-gradient(90deg,#153f5f,#11446d);
+      color: #fff; border-bottom-right-radius: 4px;
+    }
+    .bot {
+      align-self: flex-start;
+      background: rgba(255,255,255,0.05);
+      color: #eaf0ff;
+    }
+    .controls { padding: 14px; background: rgba(255,255,255,0.02); border-radius: 12px; }
+    .big-btn {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 12px 16px; border-radius: 12px; border: 0;
+      cursor: pointer; font-weight: 600;
+    }
+    .primary { background: linear-gradient(90deg,var(--accent),#4cc9f0); color: #071133; }
+    .danger { background: transparent; border: 1px solid rgba(255,255,255,0.08); color: #e6eef8; }
+    .controls-row { display: flex; gap: 12px; align-items: center; }
+    .timer { font-variant-numeric: tabular-nums; color: var(--muted); }
+    .visualizer { display: flex; gap: 4px; align-items: end; height: 40px; }
+    .bar {
+      width: 6px; background: linear-gradient(180deg,#ffffff22,#fff);
+      border-radius: 3px; opacity: 0.85; transform-origin: bottom;
+      transition: height .12s ease;
+    }
+    .visualizer.recording .bar { animation: level 600ms infinite ease-in-out; }
+    @keyframes level { 0%,100%{height:8px} 50%{height:34px} }
+    footer { margin-top: 12px; }
+    audio { width: 100%; margin-top: 8px; }
+    .spinner {
+      width: 18px; height: 18px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--accent);
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width:880px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <header>
+        <div class="logo">CL</div>
+        <div>
+          <h1>Clara - Realtime Voice Chatbot</h1>
+          <div class="sub">Talk naturally, get fun & witty replies.</div>
+        </div>
+        <div class="status">
+          <div id="statusText" class="sub">idle</div>
+          <div id="statusDot" class="dot off"></div>
+        </div>
+      </header>
+
+      <main>
+        <section>
+          <div class="messages-card">
+            <div id="messages" class="messages"></div>
+          </div>
+        </section>
+
+        <aside>
+          <div class="controls">
+            <div class="controls-row">
+              <button id="startBtn" class="big-btn primary">🎤 Start</button>
+              <button id="stopBtn" class="big-btn danger" disabled>⏹ Stop</button>
+              <div class="timer" id="timer">00:00</div>
+            </div>
+
+            <div style="margin-top:12px; display:flex; align-items:center; gap:12px">
+              <div id="visualizer" class="visualizer"></div>
+              <div id="spinnerWrap" style="min-width:22px"></div>
+            </div>
+
+            <footer>
+              <audio id="botAudio" controls hidden></audio>
+              <button id="clearBtn" class="big-btn danger" style="margin-top:8px;width:100%">Clear Chat</button>
+            </footer>
+          </div>
+        </aside>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const BACKEND = "http://127.0.0.1:8000/chat";
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const messagesEl = document.getElementById("messages");
+    const visualizer = document.getElementById("visualizer");
+    const statusText = document.getElementById("statusText");
+    const statusDot = document.getElementById("statusDot");
+    const timerEl = document.getElementById("timer");
+    const botAudio = document.getElementById("botAudio");
+    const spinnerWrap = document.getElementById("spinnerWrap");
+
+    
+    let mediaRecorder, chunks = [], timerInterval;
+
+    
+    for (let i = 0; i < 16; i++) {
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.style.height = `${6 + Math.random()*30}px`;
+      visualizer.appendChild(bar);
+    }
+
+    
+    function setStatus(text, active) {
+      statusText.textContent = text;
+      statusDot.classList.toggle("off", !active);
+    }
+
+    
+    function addBubble(role, text) {
+      const bubble = document.createElement("div");
+      bubble.className = `bubble ${role}`;
+      bubble.textContent = text;
+      messagesEl.appendChild(bubble);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    
+    function startTimer() {
+      const start = Date.now();
+      timerInterval = setInterval(() => {
+        const s = Math.floor((Date.now() - start) / 1000);
+        timerEl.textContent =
+          `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+      }, 250);
+    }
+    function stopTimer() {
+      clearInterval(timerInterval);
+      timerEl.textContent = "00:00";
+    }
+
+    async function startRecording() {
+      try {
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        setStatus("recording", true);
+        visualizer.classList.add("recording");
+        chunks = [];
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e => e.data.size > 0 && chunks.push(e.data);
+        mediaRecorder.start();
+        startTimer();
+      } catch {
+        alert("Microphone not accessible");
+        resetUI();
+      }
+    }
+
+    function stopRecording() {
+      stopBtn.disabled = true;
+      startBtn.disabled = false;
+      mediaRecorder.stop();
+      visualizer.classList.remove("recording");
+      setStatus("processing", true);
+      stopTimer();
+      spinnerWrap.innerHTML = '<div class="spinner"></div>';
+    }
+
+    async function handleRecording() {
+      const blob = new Blob(chunks, { type: chunks[0]?.type || "audio/webm" });
+      const form = new FormData();
+      form.append("audio_file", blob, "rec.webm");
+
+      try {
+        const r = await fetch(BACKEND, { method: "POST", body: form });
+        const d = await r.json();
+
+        addBubble("user", d.user_transcription || "[no text]");
+        addBubble("bot", d.bot_response || "[no reply]");
+
+        if (d.audio_base64) {
+          botAudio.src = `data:${d.audio_mime};base64,${d.audio_base64}`;
+          botAudio.hidden = false;
+          botAudio.play().catch(()=>{});
+        }
+        setStatus("idle", true);
+      } catch (e) {
+        alert("Error: " + e.message);
+        setStatus("error", false);
+      } finally {
+        spinnerWrap.innerHTML = "";
+      }
+    }
+
+    function resetUI() {
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      setStatus("idle", false);
+    }
+
+    startBtn.onclick = startRecording;
+    stopBtn.onclick = () => { stopRecording(); mediaRecorder.onstop = handleRecording; };
+    clearBtn.onclick = () => {
+      messagesEl.innerHTML = "";
+      botAudio.hidden = true;
+      setStatus("idle", false);
+    };
+
+    resetUI();
+  </script>
+</body>
+</html>
